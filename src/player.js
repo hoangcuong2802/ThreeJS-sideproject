@@ -15,8 +15,9 @@ export class Player {
       this.mesh.position.set(0, 0, 0)
 
       // rotation đúng (độ → rad)
-      this.mesh.rotation.y = THREE.MathUtils.degToRad(180)
-
+      //this.mesh.rotation.y = THREE.MathUtils.degToRad(180)
+      this.mesh.rotation.y = Math.PI 
+      
       scene.add(this.mesh)
 
       // Animation
