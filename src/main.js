@@ -15,11 +15,20 @@ const obstacles = new ObstacleManager(scene)
 const progress = new ProgressTracker()
 const ui = new UI()
 
+
+
+const tracker = new WebcamHeadController((offset) => {
+  if (offset > 0.25) player.setLane(1)
+  else if (offset < -0.25) player.setLane(-1)
+  else player.setLane(0)
+})
+
+tracker.init()
+
 const setLane = (lane) => player.setLane(lane)
 
 new KeyboardController(setLane)
 new HeadController(setLane)
-new WebcamHeadController(setLane)
 
 const webcamController = new WebcamHeadController((lane, source) => {
   console.log('Lane change from', source, lane)

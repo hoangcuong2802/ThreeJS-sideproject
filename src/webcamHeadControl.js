@@ -1,80 +1,64 @@
-import * as tf from '@tensorflow/tfjs'
-import '@tensorflow/tfjs-backend-webgl'
-import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection'
+import { FaceMesh } from '@mediapipe/face_mesh'
+import { Camera } from '@mediapipe/camera_utils'
+import * as Kalidokit from 'kalidokit'
 
 export class WebcamHeadController {
-  constructor(onLaneChange) {
-    this.onLaneChange = onLaneChange
-    this.currentLane = 0
-    this.smoothedOffset = 0
-
-    this.deadZone = 0.15
-    this.smoothFactor = 0.25
-    this.detectInterval = 150
-
-    this.init()
-  }
-
-  async init() {
-    await tf.setBackend('webgl')
-    await tf.ready()
-
+  constructor(onMove) {
+    this.onMove = onMove // callback(offsetX)
     this.video = document.createElement('video')
     this.video.autoplay = true
     this.video.playsInline = true
-
-    this.video.srcObject = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240 }
-    })
-
-    await this.video.play()
-    console.log('Webcam ready')
-
-    this.detector = await faceLandmarksDetection.createDetector(
-      faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-      {
-        runtime: 'tfjs',
-        refineLandmarks: false
-      }
-    )
-
-    console.log('Face detector ready')
-    this.track()
   }
 
-  async track() {
-    const faces = await this.detector.estimateFaces(this.video)
+  async init() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }
+    })
+    this.video.srcObject = stream
 
-    console.log('faces', faces.length)
+    this.faceMesh = new FaceMesh({
+      locateFile: file =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    })
 
-    if (faces.length > 0) {
-      const keypoints = faces[0].keypoints
+    this.faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    })
 
-      const nose = keypoints.find(p => p.name === 'noseTip')
-      const left = keypoints.find(p => p.name === 'leftCheek')
-      const right = keypoints.find(p => p.name === 'rightCheek')
+    this.faceMesh.onResults(this.onResults.bind(this))
 
-      if (nose && left && right) {
-        const centerX = (left.x + right.x) / 2
-        const faceWidth = right.x - left.x
-        const offset = (nose.x - centerX) / (faceWidth * 0.5)
+    this.camera = new Camera(this.video, {
+      onFrame: async () => {
+        await this.faceMesh.send({ image: this.video })
+      },
+      width: 640,
+      height: 480
+    })
 
-        this.smoothedOffset +=
-          (offset - this.smoothedOffset) * this.smoothFactor
+    this.camera.start()
+    console.log('HeadTracker ready')
+  }
 
-        console.log('offset', this.smoothedOffset.toFixed(2))
+  onResults(results) {
+    if (!results.multiFaceLandmarks?.length) return
 
-        let lane = 0
-        if (this.smoothedOffset > this.deadZone) lane = 1
-        else if (this.smoothedOffset < -this.deadZone) lane = -1
+    const landmarks = results.multiFaceLandmarks[0]
 
-        if (lane !== this.currentLane) {
-          this.currentLane = lane
-          this.onLaneChange(lane, 'webcam')
-        }
-      }
-    }
+    const rigged = Kalidokit.Face.solve(landmarks, {
+      runtime: 'mediapipe',
+      smoothBlink: true
+    })
 
-    setTimeout(() => this.track(), this.detectInterval)
+    const yaw = rigged.head.y // trái (-) → phải (+)
+
+    // clamp + scale
+    const offset = Math.max(-1, Math.min(1, yaw * 2))
+
+    console.log('head offset', offset.toFixed(2))
+
+    this.onMove(offset)
   }
 }
